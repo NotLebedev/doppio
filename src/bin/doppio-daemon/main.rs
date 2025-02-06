@@ -20,8 +20,6 @@ use tokio::{
 };
 use zbus::Connection;
 
-static STATE: OnceLock<State<'static>> = OnceLock::new();
-
 const ANOTHER_MSG: &'static str = formatcp!(
     "Is another instance of {}-daemon running?",
     env!("CARGO_PKG_NAME")
@@ -35,7 +33,14 @@ async fn main() -> Result<()> {
         ));
     };
 
-    let _ = STATE.set(State::new(&connection).await.unwrap());
+    let Ok(state) = State::new(&connection).await else {
+        return Err(anyhow!(
+            "Could not connect to login1 Manager! Is systemd configured correctly?"
+        ));
+    };
+
+    static STATE: OnceLock<State> = OnceLock::new();
+    let state = STATE.get_or_init(|| state);
 
     let Ok(_lock) = acquire_run_lock() else {
         return Err(anyhow!("Could not acquire lock file! {}", ANOTHER_MSG));
@@ -52,7 +57,7 @@ async fn main() -> Result<()> {
             continue;
         };
 
-        tokio::spawn(task(stream));
+        tokio::spawn(task(&state, stream));
     }
 }
 
@@ -70,26 +75,22 @@ fn acquire_run_lock() -> Result<Flock<std::fs::File>> {
         .map_err(anyhow::Error::msg)
 }
 
-async fn task<'a>(mut stream: UnixStream) -> Option<()> {
-    let message = read(&mut stream).await?;
+async fn task(state: &State<'_>, mut stream: UnixStream) {
+    let Some(message) = read(&mut stream).await else {
+        return;
+    };
 
     let response = match message {
-        Request::Inhibit { id } => inhibit(id).await,
-        Request::Release { id } => release(id).await,
-        Request::Status { id } => status(id).await,
-        Request::ActiveInhibitors => active_inhibitors().await,
+        Request::Inhibit { id } => inhibit(&state, id).await,
+        Request::Release { id } => release(&state, id).await,
+        Request::Status { id } => status(&state, id).await,
+        Request::ActiveInhibitors => active_inhibitors(&state).await,
     };
 
     let _ = stream.write_all(response.ser().as_bytes()).await;
-
-    Some(())
 }
 
-async fn inhibit(id: String) -> Response {
-    let Some(state) = STATE.get() else {
-        return ErrorKind::DaemonError.response();
-    };
-
+async fn inhibit(state: &State<'_>, id: String) -> Response {
     if state.inhibit(&id).await.is_err() {
         return ErrorKind::OperationFailed.response();
     }
@@ -97,13 +98,8 @@ async fn inhibit(id: String) -> Response {
     Response::Ok
 }
 
-async fn release(id: String) -> Response {
-    let Some(state) = STATE.get() else {
-        return ErrorKind::DaemonError.response();
-    };
-
+async fn release(state: &State<'_>, id: String) -> Response {
     state.release(&id).await;
-
     Response::Ok
 }
 
@@ -116,7 +112,7 @@ async fn read(stream: &mut UnixStream) -> Option<Request> {
         return None;
     };
 
-    return match serde_json::from_str(&message) {
+    match serde_json::from_str(&message) {
         Ok(request) => Some(request),
         Err(_) => {
             let _ = stream
@@ -125,31 +121,20 @@ async fn read(stream: &mut UnixStream) -> Option<Request> {
 
             return None;
         }
-    };
-}
-
-async fn status(id: String) -> Response {
-    let Some(state) = STATE.get() else {
-        return ErrorKind::DaemonError.response();
-    };
-
-    let is_inhibited = state.is_inhibited(&id).await;
-
-    Response::Status {
-        status: if is_inhibited {
-            Status::Inhibits
-        } else {
-            Status::Free
-        },
     }
 }
 
-async fn active_inhibitors() -> Response {
-    let Some(state) = STATE.get() else {
-        return ErrorKind::DaemonError.response();
+async fn status(state: &State<'_>, id: String) -> Response {
+    let status = if state.is_inhibited(&id).await {
+        Status::Inhibits
+    } else {
+        Status::Free
     };
 
-    Response::ActiveInhibitors {
-        active_inhibitors: state.active_inhibitors().await,
-    }
+    Response::Status { status }
+}
+
+async fn active_inhibitors(state: &State<'_>) -> Response {
+    let active_inhibitors = state.active_inhibitors().await;
+    Response::ActiveInhibitors { active_inhibitors }
 }

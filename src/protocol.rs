@@ -28,7 +28,6 @@ pub enum Status {
 pub enum ErrorKind {
     SocketError,
     InvalidRequest,
-    DaemonError,
     OperationFailed,
 }
 

@@ -115,9 +115,6 @@ fn parse_error(kind: ErrorKind, operation_name: &str) -> anyhow::Error {
                 VERSION_MSG
             )
         }
-        ErrorKind::DaemonError => {
-            anyhow!("doppio-daemon experienced internal error. {}", RESTART_MSG)
-        }
         ErrorKind::OperationFailed => {
             anyhow!(
                 "doppio-daemon failed to {}. {}",
