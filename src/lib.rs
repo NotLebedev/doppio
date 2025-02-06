@@ -1,67 +1,29 @@
-use serde::{Deserialize, Serialize};
+use std::{env, path::PathBuf};
 
-pub const SOCKET_PATH: &'static str = "/tmp/doppio.sock";
+use anyhow::{anyhow, Result};
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Request {
-    Inhibit { id: String },
-    Release { id: String },
-    Status { id: String },
-    ActiveInhibitors,
+pub mod protocol;
+
+const DIR_NAME: &'static str = "doppio";
+
+pub fn get_tmp_dir() -> Result<PathBuf> {
+    let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
+        .ok_or_else(|| anyhow!("XDG_RUNTIME_DIR not set. Is your session running?"))?;
+
+    let mut result = PathBuf::new();
+    result.push(runtime_dir);
+    result.push(DIR_NAME);
+    Ok(result)
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Response {
-    Ok,
-    Status { status: Status },
-    ActiveInhibitors { active_inhibitors: Vec<String> },
-    Error { kind: Error },
+pub fn get_socket_path() -> Result<PathBuf> {
+    let mut result = get_tmp_dir()?;
+    result.push("doppio.sock");
+    Ok(result)
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum Status {
-    Inhibits,
-    Free,
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum Error {
-    SocketError,
-    InvalidRequest,
-    DaemonError,
-    OperationFailed,
-}
-
-impl Request {
-    pub fn des(data: &str) -> Option<Self> {
-        serde_json::from_str(data).ok()
-    }
-
-    pub fn ser(&self) -> String {
-        // Unwrap should not panic, because Serialize
-        // implementation from macro is used and
-        // no maps are used in Respone at all
-        serde_json::to_string(self).unwrap()
-    }
-}
-
-impl Response {
-    pub fn des(data: &str) -> Option<Self> {
-        serde_json::from_str(data).ok()
-    }
-
-    pub fn ser(&self) -> String {
-        // Unwrap should not panic, because Serialize
-        // implementation from macro is used and
-        // no maps are used in Respone at all
-        serde_json::to_string(self).unwrap()
-    }
-}
-
-impl Error {
-    pub fn response(self) -> Response {
-        Response::Error { kind: self }
-    }
+pub fn get_lock_path() -> Result<PathBuf> {
+    let mut result = get_tmp_dir()?;
+    result.push("doppio.lock");
+    Ok(result)
 }

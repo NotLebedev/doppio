@@ -6,7 +6,11 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use doppio::{Request, Response, SOCKET_PATH};
+use const_format::formatcp;
+use doppio::{
+    get_socket_path,
+    protocol::{ErrorKind, Request, Response},
+};
 
 #[derive(Parser)]
 #[clap(name = "doppio", version)]
@@ -21,17 +25,23 @@ enum Commands {
     Release { id: String },
 }
 
-const IS_RUNNING_MSG: &'static str = "Is doppio-damon running?";
-const VERSION_MSG: &'static str = "Are doppio and doppio-daemon of the same version?";
-const RESTART_MSG: &'static str = "Try restarting doppio-daemon";
+const IS_RUNNING_MSG: &'static str = formatcp!("Is {}-daemon running?", env!("CARGO_PKG_NAME"));
+const VERSION_MSG: &'static str = formatcp!(
+    "Are {} and {}-daemon of the same version?",
+    env!("CARGO_PKG_NAME"),
+    env!("CARGO_PKG_NAME")
+);
+const RESTART_MSG: &'static str = formatcp!("Try restarting {}-daemon", env!("CARGO_PKG_NAME"));
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let stream = UnixStream::connect(SOCKET_PATH).with_context(|| {
+    let socket_path = get_socket_path()?;
+    let stream = UnixStream::connect(&socket_path).with_context(|| {
         format!(
             "Faild to connect to doppio socket at {}. {}",
-            SOCKET_PATH, IS_RUNNING_MSG,
+            socket_path.to_string_lossy(),
+            IS_RUNNING_MSG,
         )
     })?;
 
@@ -70,21 +80,21 @@ fn release(mut stream: UnixStream, id: String) -> Result<()> {
     }
 }
 
-fn parse_error(kind: doppio::Error, operation_name: &str) -> anyhow::Error {
+fn parse_error(kind: ErrorKind, operation_name: &str) -> anyhow::Error {
     match kind {
-        doppio::Error::SocketError => {
+        ErrorKind::SocketError => {
             anyhow!("doppio-daemon failed to respond. {}", VERSION_MSG)
         }
-        doppio::Error::InvalidRequest => {
+        ErrorKind::InvalidRequest => {
             anyhow!(
                 "doppio-daemon failed did not understand the request. {}",
                 VERSION_MSG
             )
         }
-        doppio::Error::DaemonError => {
+        ErrorKind::DaemonError => {
             anyhow!("doppio-daemon experienced internal error. {}", RESTART_MSG)
         }
-        doppio::Error::OperationFailed => {
+        ErrorKind::OperationFailed => {
             anyhow!(
                 "doppio-daemon failed to {}. {}",
                 operation_name,
@@ -95,20 +105,13 @@ fn parse_error(kind: doppio::Error, operation_name: &str) -> anyhow::Error {
 }
 
 fn communicate(stream: &mut UnixStream, request: Request) -> Result<Response> {
-    communicate_write(stream, request).with_context(|| {
-        format!(
-            "Failed to write to doppio sockedt at {}. {}",
-            SOCKET_PATH, IS_RUNNING_MSG
-        )
-    })?;
+    communicate_write(stream, request)
+        .with_context(|| format!("Failed to write to doppio sockedt. {}", IS_RUNNING_MSG))?;
 
     let mut response = String::new();
-    stream.read_to_string(&mut response).with_context(|| {
-        format!(
-            "Failed to read from doppio socket at {}. {}",
-            SOCKET_PATH, IS_RUNNING_MSG
-        )
-    })?;
+    stream
+        .read_to_string(&mut response)
+        .with_context(|| format!("Failed to read from doppio socket. {}", IS_RUNNING_MSG))?;
 
     Response::des(&response)
         .ok_or_else(|| anyhow!("Failed to parse doppio-daemon response. {}", VERSION_MSG))
