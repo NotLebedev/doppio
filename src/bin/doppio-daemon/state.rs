@@ -5,7 +5,7 @@ use futures_locks::RwLock;
 use zbus::{proxy, zvariant::OwnedFd, Connection};
 pub struct State<'a> {
     proxy: ManagerProxy<'a>,
-    active_locks: RwLock<HashMap<Box<str>, OwnedFd>>,
+    active_locks: RwLock<HashMap<String, OwnedFd>>,
 }
 
 impl<'a> State<'a> {
@@ -26,13 +26,13 @@ impl<'a> State<'a> {
 
             let mut write = self.active_locks.write().await;
 
-            write.insert(string.to_string().into(), fd);
+            write.insert(string.to_string(), fd);
         }
 
         Ok(())
     }
 
-    pub async fn release(&self, string: &str) -> Result<()> {
+    pub async fn release(&self, string: &str) {
         let read = self.active_locks.read().await;
         if read.contains_key(string) {
             drop(read);
@@ -41,8 +41,14 @@ impl<'a> State<'a> {
 
             write.remove(string);
         }
+    }
 
-        Ok(())
+    pub async fn is_inhibited(&self, string: &str) -> bool {
+        self.active_locks.read().await.contains_key(string)
+    }
+
+    pub async fn active_inhibitors(&self) -> Vec<String> {
+        self.active_locks.read().await.keys().cloned().collect()
     }
 }
 

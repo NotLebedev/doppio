@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use const_format::formatcp;
 use doppio::{
     get_lock_path, get_socket_path, get_tmp_dir,
-    protocol::{ErrorKind, Request, Response},
+    protocol::{ErrorKind, Request, Response, Status},
 };
 use nix::fcntl::{Flock, FlockArg};
 use state::State;
@@ -76,8 +76,8 @@ async fn task<'a>(mut stream: UnixStream) -> Option<()> {
     let response = match message {
         Request::Inhibit { id } => inhibit(id).await,
         Request::Release { id } => release(id).await,
-        Request::Status { id: _ } => todo!(),
-        Request::ActiveInhibitors => todo!(),
+        Request::Status { id } => status(id).await,
+        Request::ActiveInhibitors => active_inhibitors().await,
     };
 
     let _ = stream.write_all(response.ser().as_bytes()).await;
@@ -102,9 +102,7 @@ async fn release(id: String) -> Response {
         return ErrorKind::DaemonError.response();
     };
 
-    if state.release(&id).await.is_err() {
-        return ErrorKind::OperationFailed.response();
-    }
+    state.release(&id).await;
 
     Response::Ok
 }
@@ -128,4 +126,30 @@ async fn read(stream: &mut UnixStream) -> Option<Request> {
             return None;
         }
     };
+}
+
+async fn status(id: String) -> Response {
+    let Some(state) = STATE.get() else {
+        return ErrorKind::DaemonError.response();
+    };
+
+    let is_inhibited = state.is_inhibited(&id).await;
+
+    Response::Status {
+        status: if is_inhibited {
+            Status::Inhibits
+        } else {
+            Status::Free
+        },
+    }
+}
+
+async fn active_inhibitors() -> Response {
+    let Some(state) = STATE.get() else {
+        return ErrorKind::DaemonError.response();
+    };
+
+    Response::ActiveInhibitors {
+        active_inhibitors: state.active_inhibitors().await,
+    }
 }
