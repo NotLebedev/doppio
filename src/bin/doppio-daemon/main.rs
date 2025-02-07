@@ -7,7 +7,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use const_format::formatcp;
 use doppio::{
     get_lock_path, get_socket_path, get_tmp_dir,
     protocol::{ErrorKind, Request, Response, Status},
@@ -20,10 +19,7 @@ use tokio::{
 };
 use zbus::Connection;
 
-const ANOTHER_MSG: &'static str = formatcp!(
-    "Is another instance of {}-daemon running?",
-    env!("CARGO_PKG_NAME")
-);
+const ANOTHER_MSG: &'static str = "Is another instance of doppio-daemon running?";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,11 +49,9 @@ async fn main() -> Result<()> {
     };
 
     loop {
-        let Ok((stream, _)) = listener.accept().await else {
-            continue;
-        };
-
-        tokio::spawn(task(&state, stream));
+        if let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(task(&state, stream));
+        }
     }
 }
 
@@ -92,10 +86,10 @@ async fn task(state: &State<'_>, mut stream: UnixStream) {
 
 async fn inhibit(state: &State<'_>, id: String) -> Response {
     if state.inhibit(&id).await.is_err() {
-        return ErrorKind::OperationFailed.response();
+        ErrorKind::OperationFailed.response()
+    } else {
+        Response::Ok
     }
-
-    Response::Ok
 }
 
 async fn release(state: &State<'_>, id: String) -> Response {
@@ -112,14 +106,14 @@ async fn read(stream: &mut UnixStream) -> Option<Request> {
         return None;
     };
 
-    match serde_json::from_str(&message) {
-        Ok(request) => Some(request),
-        Err(_) => {
+    match Request::des(&message) {
+        Some(request) => Some(request),
+        None => {
             let _ = stream
                 .write_all(ErrorKind::InvalidRequest.response().ser().as_bytes())
                 .await;
 
-            return None;
+            None
         }
     }
 }
