@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use futures_locks::RwLock;
+use tokio::sync::RwLock;
 use zbus::{proxy, zvariant::OwnedFd, Connection};
 pub struct State<'a> {
     proxy: ManagerProxy<'a>,
