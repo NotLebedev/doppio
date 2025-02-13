@@ -6,24 +6,30 @@ pub mod protocol;
 
 const DIR_NAME: &'static str = "doppio";
 
-pub fn get_tmp_dir() -> Result<PathBuf> {
-    let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
-        .ok_or_else(|| anyhow!("XDG_RUNTIME_DIR not set. Is your session running?"))?;
-
-    let mut result = PathBuf::new();
-    result.push(runtime_dir);
-    result.push(DIR_NAME);
-    Ok(result)
+pub struct Locations {
+    pub tmp_dir: PathBuf,
+    pub socket_path: PathBuf,
+    pub lock_path: PathBuf,
 }
 
-pub fn get_socket_path() -> Result<PathBuf> {
-    let mut result = get_tmp_dir()?;
-    result.push("doppio.sock");
-    Ok(result)
-}
+impl Locations {
+    pub fn new() -> Result<Self> {
+        let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
+            .ok_or_else(|| anyhow!("XDG_RUNTIME_DIR not set. Is your session running?"))?;
 
-pub fn get_lock_path() -> Result<PathBuf> {
-    let mut result = get_tmp_dir()?;
-    result.push("doppio.lock");
-    Ok(result)
+        let mut tmp_dir = PathBuf::from(runtime_dir);
+        tmp_dir.push(DIR_NAME);
+
+        let mut socket_path = tmp_dir.clone();
+        socket_path.push("doppio.sock");
+
+        let mut lock_path = tmp_dir.clone();
+        lock_path.push("doppio.lock");
+
+        Ok(Locations {
+            tmp_dir,
+            socket_path,
+            lock_path,
+        })
+    }
 }

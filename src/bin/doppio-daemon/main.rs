@@ -8,8 +8,8 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use doppio::{
-    get_lock_path, get_socket_path, get_tmp_dir,
     protocol::{ErrorKind, Request, Response, Status},
+    Locations,
 };
 use nix::fcntl::{Flock, FlockArg};
 use state::State;
@@ -23,6 +23,8 @@ const ANOTHER_MSG: &'static str = "Is another instance of doppio-daemon running?
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let locations = Locations::new()?;
+
     let Ok(connection) = Connection::system().await else {
         return Err(anyhow!(
             "Could not connect to system bus! Is d-bus running?"
@@ -38,13 +40,12 @@ async fn main() -> Result<()> {
     static STATE: OnceLock<State> = OnceLock::new();
     let state = STATE.get_or_init(|| state);
 
-    let Ok(_lock) = acquire_run_lock() else {
+    let Ok(_lock) = acquire_run_lock(&locations) else {
         return Err(anyhow!("Could not acquire lock file! {}", ANOTHER_MSG));
     };
 
-    let socket_path = get_socket_path()?;
-    let _ = remove_file(&socket_path);
-    let Ok(listener) = UnixListener::bind(socket_path) else {
+    let _ = remove_file(&locations.socket_path);
+    let Ok(listener) = UnixListener::bind(&locations.socket_path) else {
         return Err(anyhow!("Could not connect to socket! {}", ANOTHER_MSG));
     };
 
@@ -55,14 +56,14 @@ async fn main() -> Result<()> {
     }
 }
 
-fn acquire_run_lock() -> Result<Flock<std::fs::File>> {
-    let _ = fs::create_dir_all(get_tmp_dir()?);
+fn acquire_run_lock(locations: &Locations) -> Result<Flock<std::fs::File>> {
+    let _ = fs::create_dir_all(&locations.tmp_dir);
 
     let lock_file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(get_lock_path()?)?;
+        .open(&locations.lock_path)?;
 
     Flock::lock(lock_file, FlockArg::LockExclusiveNonblock)
         .map_err(|(_, err)| io::Error::from(err))

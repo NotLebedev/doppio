@@ -8,8 +8,8 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use doppio::{
-    get_socket_path,
     protocol::{ErrorKind, Request, Response, Status},
+    Locations,
 };
 
 #[derive(Parser)]
@@ -33,11 +33,12 @@ const RESTART_MSG: &'static str = "Try restarting doppio-daemon";
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let socket_path = get_socket_path()?;
-    let stream = setup_socket(&socket_path).with_context(|| {
+    let locations = Locations::new()?;
+
+    let stream = setup_socket(&locations.socket_path).with_context(|| {
         format!(
             "Faild to connect to doppio socket at {}. {}",
-            socket_path.to_string_lossy(),
+            locations.socket_path.to_string_lossy(),
             IS_RUNNING_MSG,
         )
     })?;
